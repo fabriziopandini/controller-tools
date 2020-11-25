@@ -23,6 +23,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"sigs.k8s.io/controller-tools/pkg/openapiv3"
 
 	"sigs.k8s.io/controller-tools/pkg/crd"
 	"sigs.k8s.io/controller-tools/pkg/deepcopy"
@@ -36,7 +37,7 @@ import (
 	"sigs.k8s.io/controller-tools/pkg/webhook"
 )
 
-//go:generate go run ../helpgen/main.go paths=../../pkg/... generate:headerFile=../../boilerplate.go.txt,year=2019
+//go:generate go run ../helpgen/main.go paths=../../pkg/... generate:headerFile=../../boilerplate.go.txt,year=2020
 
 // Options are specified to controller-gen by turning generators and output rules into
 // markers, and then parsing them using the standard registry logic (without the "+").
@@ -53,6 +54,7 @@ var (
 		"object":      deepcopy.Generator{},
 		"webhook":     webhook.Generator{},
 		"schemapatch": schemapatcher.Generator{},
+		"openapiv3":   openapiv3.Generator{},
 	}
 
 	// allOutputRules defines the list of all known output rules, giving
