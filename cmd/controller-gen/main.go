@@ -143,6 +143,9 @@ func main() {
 	# Generate OpenAPI v3 schemas for API packages and merge them into existing CRD manifests
 	controller-gen schemapatch:manifests=./manifests output:dir=./manifests paths=./pkg/apis/... 
 
+    # Generate OpenAPI v3 specification for each CRD/Spec.Versions.
+	controller-gen openapiv3 paths=./api/... output:openapiv3:dir=/tmp/openapi 
+
 	# Run all the generators for a given project
 	controller-gen paths=./apis/...
 

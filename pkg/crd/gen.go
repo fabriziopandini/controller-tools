@@ -87,12 +87,50 @@ type Generator struct {
 }
 
 func (Generator) CheckFilter() loader.NodeFilter {
-	return filterTypesForCRDs
+	return FilterTypesForCRDs
 }
 func (Generator) RegisterMarkers(into *markers.Registry) error {
 	return crdmarkers.Register(into)
 }
 func (g Generator) Generate(ctx *genall.GenerationContext) error {
+	crds, err := g.GetCRD(ctx)
+	if err != nil {
+		return err
+	}
+
+	for _, crd := range crds {
+		var fileName string
+		if crd.DefaultVersion {
+			fileName = fmt.Sprintf("%s_%s.yaml", crd.GroupName, crd.PluralName)
+		} else {
+			fileName = fmt.Sprintf("%s_%s.%s.yaml", crd.GroupName, crd.PluralName, crd.Version)
+		}
+		if err := ctx.WriteYAML(fileName, crd.Object); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// GenCRD holds information about a generated crd.
+type GenCRD struct {
+	// GroupName as defined in the groupName marker.
+	GroupName string
+
+	// PluralName of the generated crd.
+	PluralName string
+
+	// Version of the generated crd.
+	Version string
+
+	// DefaultVersion is true for all the crds with version equals to the first version to generate.
+	DefaultVersion bool
+
+	// Object with the actual CRD type (one of v1 or v1beta1 extensions types).
+	Object interface{}
+}
+
+func (g Generator) GetCRD(ctx *genall.GenerationContext) ([]GenCRD, error) {
 	parser := &Parser{
 		Collector: ctx.Collector,
 		Checker:   ctx.Checker,
@@ -108,14 +146,14 @@ func (g Generator) Generate(ctx *genall.GenerationContext) error {
 	metav1Pkg := FindMetav1(ctx.Roots)
 	if metav1Pkg == nil {
 		// no objects in the roots, since nothing imported metav1
-		return nil
+		return nil, nil
 	}
 
 	// TODO: allow selecting a specific object
 	kubeKinds := FindKubeKinds(parser, metav1Pkg)
 	if len(kubeKinds) == 0 {
 		// no objects in the roots
-		return nil
+		return nil, nil
 	}
 
 	crdVersions := g.CRDVersions
@@ -124,6 +162,7 @@ func (g Generator) Generate(ctx *genall.GenerationContext) error {
 		crdVersions = []string{defaultVersion}
 	}
 
+	generatedCRDs := make([]GenCRD, 0, len(kubeKinds)*len(g.CRDVersions))
 	for groupKind := range kubeKinds {
 		parser.NeedCRDFor(groupKind, g.MaxDescLen)
 		crdRaw := parser.CustomResourceDefinitions[groupKind]
@@ -133,7 +172,7 @@ func (g Generator) Generate(ctx *genall.GenerationContext) error {
 		for i, ver := range crdVersions {
 			conv, err := AsVersion(crdRaw, schema.GroupVersion{Group: apiext.SchemeGroupVersion.Group, Version: ver})
 			if err != nil {
-				return err
+				return nil, err
 			}
 			versionedCRDs[i] = conv
 		}
@@ -157,7 +196,7 @@ func (g Generator) Generate(ctx *genall.GenerationContext) error {
 		case g.PreserveUnknownFields == nil, g.PreserveUnknownFields != nil && !*g.PreserveUnknownFields:
 			// it'll be false here (coming from v1) -- leave it as such
 		default:
-			return fmt.Errorf("you may only set PreserveUnknownFields to true with v1beta1 CRDs")
+			return nil, fmt.Errorf("you may only set PreserveUnknownFields to true with v1beta1 CRDs")
 		}
 
 		for i, crd := range versionedCRDs {
@@ -166,19 +205,17 @@ func (g Generator) Generate(ctx *genall.GenerationContext) error {
 			if crdVersions[i] == "v1beta1" {
 				removeDefaultsFromSchemas(crd.(*apiextlegacy.CustomResourceDefinition))
 			}
-			var fileName string
-			if i == 0 {
-				fileName = fmt.Sprintf("%s_%s.yaml", crdRaw.Spec.Group, crdRaw.Spec.Names.Plural)
-			} else {
-				fileName = fmt.Sprintf("%s_%s.%s.yaml", crdRaw.Spec.Group, crdRaw.Spec.Names.Plural, crdVersions[i])
-			}
-			if err := ctx.WriteYAML(fileName, crd); err != nil {
-				return err
-			}
+			generatedCRDs = append(generatedCRDs, GenCRD{
+				GroupName:      crdRaw.Spec.Group,
+				PluralName:     crdRaw.Spec.Names.Plural,
+				Version:        crdVersions[i],
+				DefaultVersion: i == 0,
+				Object:         crd,
+			})
 		}
 	}
 
-	return nil
+	return generatedCRDs, nil
 }
 
 // removeDefaultsFromSchemas will remove all instances of default values being
@@ -331,9 +368,9 @@ func FindKubeKinds(parser *Parser, metav1Pkg *loader.Package) map[schema.GroupKi
 	return kubeKinds
 }
 
-// filterTypesForCRDs filters out all nodes that aren't used in CRD generation,
+// FilterTypesForCRDs filters out all nodes that aren't used in CRD generation,
 // like interfaces and struct fields without JSON tag.
-func filterTypesForCRDs(node ast.Node) bool {
+func FilterTypesForCRDs(node ast.Node) bool {
 	switch node := node.(type) {
 	case *ast.InterfaceType:
 		// skip interfaces, we never care about references in them
